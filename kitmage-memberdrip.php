@@ -197,12 +197,17 @@ final class KMD_Core {
 
     public static function release_at($lesson, $user) {
         $mode = (string)get_post_meta($lesson, '_kmd_release_mode', true);
+        $start = $mode === 'relative' ? self::enrollment_start(absint(get_post_meta($lesson, '_kmd_parent', true)), $user) : 0;
+        return self::release_for_start($lesson, $start);
+    }
+
+    public static function release_for_start($lesson, $start) {
+        $mode = (string)get_post_meta($lesson, '_kmd_release_mode', true);
         if ($mode === '' || $mode === 'fixed') return self::timestamp((string)get_post_meta($lesson, '_kmd_release', true));
         if ($mode !== 'relative') return false;
         $days = (string)get_post_meta($lesson, '_kmd_release_days', true);
         if (!preg_match('/^[0-9]{1,4}$/D', $days)) return false;
-        $start = self::enrollment_start(absint(get_post_meta($lesson, '_kmd_parent', true)), $user);
-        if (!$start) return false;
+        if (!$start || !is_int($start)) return false;
         return $start + (int)$days * 86400;
     }
 
@@ -388,4 +393,6 @@ require_once __DIR__ . '/includes/notifications.php';
 KMD_Notifications::boot();
 require_once __DIR__ . '/includes/duplicate.php';
 KMD_Duplicate::boot();
+require_once __DIR__ . '/includes/preview.php';
+KMD_Preview::boot();
 register_deactivation_hook(__FILE__, ['KMD_Notifications', 'deactivate']);
