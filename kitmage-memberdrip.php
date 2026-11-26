@@ -2,7 +2,7 @@
 /**
  * Plugin Name: KitMage Member Drip
  * Description: Development foundation for purchase-protected seasonal experiences.
- * Version: 0.6.0-dev
+ * Version: 0.7.0-dev
  * Requires PHP: 7.4
  */
 defined('ABSPATH') || exit;
@@ -63,21 +63,41 @@ final class KMD_Core {
         }
     }
 
+    public static function post_choices($name, $label, $type, $selected_id = 0) {
+        $posts = get_posts(['post_type'=>$type, 'post_status'=>['publish','draft','private','pending','future'],
+            'numberposts'=>-1, 'orderby'=>'title', 'order'=>'ASC']);
+        echo '<p><label>' . esc_html($label) . '<br><select name="' . esc_attr($name) . '"><option value="0">Select…</option>';
+        foreach ($posts as $post) {
+            if (!current_user_can('edit_post', $post->ID)) continue;
+            echo '<option value="' . (int)$post->ID . '" ' . selected($selected_id, $post->ID, false) . '>' .
+                esc_html($post->post_title . ' (#' . $post->ID . ', ' . $post->post_status . ')') . '</option>';
+        }
+        if ($selected_id && !in_array($selected_id, array_map('intval', wp_list_pluck($posts, 'ID')), true)) {
+            echo '<option value="' . (int)$selected_id . '" selected>Existing selection (#' . (int)$selected_id . ')</option>';
+        }
+        echo '</select></label></p>';
+    }
+
     private static function field($id, $key, $label, $type) {
         $value = get_post_meta($id, $key, true);
         printf('<p><label for="%1$s">%2$s</label><br><input id="%1$s" name="%1$s" type="%3$s" value="%4$s"></p>',
             esc_attr($key), esc_html($label), esc_attr($type), esc_attr($value));
+        if ($type === 'datetime-local' && $value === 'configure') {
+            echo '<p><strong>Choose a new date before access can open.</strong> <label><input type="checkbox" name="' . esc_attr($key . '_clear') . '" value="1"> Explicitly use no date</label></p>';
+        }
     }
 
     public static function fields($post) {
         wp_nonce_field('kmd_save', 'kmd_nonce');
         if ($post->post_type === self::TYPE) {
-            self::field($post->ID, '_kmd_product', 'WooCommerce product ID', 'number');
+            self::post_choices('_kmd_product', 'WooCommerce product', 'product', absint(get_post_meta($post->ID, '_kmd_product', true)));
+            echo '<p>To use a specific product variation, select its ID below instead.</p>';
+            self::field($post->ID, '_kmd_variation', 'Optional variation ID (overrides product)', 'number');
             self::field($post->ID, '_kmd_expiry', 'Access closes (site local date/time; blank = no expiry)', 'datetime-local');
-            self::field($post->ID, '_kmd_email_page', 'Published experience access page ID for email links', 'number');
+            self::post_choices('_kmd_email_page', 'Experience access page for email links', 'page', absint(get_post_meta($post->ID, '_kmd_email_page', true)));
             echo '<p><label><input type="checkbox" name="_kmd_email_enabled" value="1" ' . checked(get_post_meta($post->ID, '_kmd_email_enabled', true), '1', false) . '> Enable automatic participant emails (off by default)</label></p>';
         } else {
-            self::field($post->ID, '_kmd_parent', 'Experience ID', 'number');
+            self::post_choices('_kmd_parent', 'Experience', self::TYPE, absint(get_post_meta($post->ID, '_kmd_parent', true)));
             self::field($post->ID, '_kmd_release', 'Release (site local date/time; blank = immediately)', 'datetime-local');
             echo '<p><label><input type="checkbox" name="_kmd_sharing" value="1" ' . checked(get_post_meta($post->ID, '_kmd_sharing', true), '1', false) . '> Enable private reflections</label></p>';
         }
@@ -103,11 +123,13 @@ final class KMD_Core {
             update_post_meta($id, '_kmd_email_enabled', isset($_POST['_kmd_email_enabled']) && $_POST['_kmd_email_enabled'] === '1' ? '1' : '0');
         }
         $keys = $post->post_type === self::TYPE
-            ? ['_kmd_product', '_kmd_expiry', '_kmd_email_page'] : ['_kmd_parent', '_kmd_release'];
+            ? ['_kmd_product', '_kmd_variation', '_kmd_expiry', '_kmd_email_page'] : ['_kmd_parent', '_kmd_release'];
         foreach ($keys as $key) {
             if (!isset($_POST[$key]) || !is_string($_POST[$key])) continue;
             $value = sanitize_text_field(wp_unslash($_POST[$key]));
-            if (in_array($key, ['_kmd_product', '_kmd_parent', '_kmd_email_page'], true)) $value = absint($value);
+            if (in_array($key, ['_kmd_product', '_kmd_variation', '_kmd_parent', '_kmd_email_page'], true)) $value = absint($value);
+            if (in_array($key, ['_kmd_expiry','_kmd_release'], true) && $value === ''
+                && get_post_meta($id, $key, true) === 'configure' && empty($_POST[$key . '_clear'])) continue;
             // Preserve invalid dates so access fails closed rather than opening accidentally.
             update_post_meta($id, $key, $value);
         }
@@ -120,6 +142,8 @@ final class KMD_Core {
         if ($override === 'grant') return true;
         if (!function_exists('wc_get_orders') || !function_exists('wc_get_is_paid_statuses')) return false;
         $product = absint(get_post_meta($experience, '_kmd_product', true));
+        $variation = absint(get_post_meta($experience, '_kmd_variation', true));
+        if ($variation) $product = $variation;
         if (!$product) return false;
         $page = 1;
         do {
@@ -274,4 +298,6 @@ require_once __DIR__ . '/includes/sharing.php';
 KMD_Sharing::boot();
 require_once __DIR__ . '/includes/notifications.php';
 KMD_Notifications::boot();
+require_once __DIR__ . '/includes/duplicate.php';
+KMD_Duplicate::boot();
 register_deactivation_hook(__FILE__, ['KMD_Notifications', 'deactivate']);
