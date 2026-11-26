@@ -42,6 +42,8 @@ jobs:
         env:
           KMD_INTEGRATION_TEST: '1'
         run: wp --path="$RUNNER_TEMP/kmd-wp" eval-file tests/wordpress-integration.php
+      - name: Exercise authenticated HTTP portal and private file delivery
+        run: bash tests/http-checks.sh
   package:
     needs: integration
     runs-on: ubuntu-latest
