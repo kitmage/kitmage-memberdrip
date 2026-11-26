@@ -2,7 +2,7 @@
 /**
  * Plugin Name: KitMage Member Drip
  * Description: Development foundation for purchase-protected seasonal experiences.
- * Version: 0.2.0-dev
+ * Version: 0.3.0-dev
  * Requires PHP: 7.4
  */
 defined('ABSPATH') || exit;
@@ -134,6 +134,14 @@ final class KMD_Core {
         return self::enrolled($id, $user);
     }
 
+    public static function lesson_allowed($lesson, $user) {
+        $post = get_post($lesson);
+        if (!$post || $post->post_type !== self::LESSON || $post->post_status !== 'publish') return false;
+        $parent = absint(get_post_meta($lesson, '_kmd_parent', true));
+        $release = self::timestamp((string)get_post_meta($lesson, '_kmd_release', true));
+        return $release !== false && (!$release || time() >= $release) && self::allowed($parent, $user);
+    }
+
     public static function guard_capability($caps, $cap, $user, $args) {
         if (in_array($cap, ['read_post', 'edit_post', 'delete_post'], true) && !empty($args[0])
             && in_array(get_post_type((int)$args[0]), [self::TYPE, self::LESSON], true)) {
@@ -213,10 +221,25 @@ final class KMD_Core {
             $output .= '<section class="kmd-lesson"><h3>' . esc_html($lesson->post_title) . '</h3>';
             if ($release === false) $output .= '<p>Not available.</p>';
             elseif ($release && time() < $release) $output .= '<p>Opens ' . esc_html(wp_date(get_option('date_format') . ' ' . get_option('time_format'), $release)) . '</p>';
-            else $output .= self::render_content($lesson);
+            else if (self::lesson_allowed($lesson->ID, get_current_user_id())) {
+                $output .= self::render_content($lesson);
+                foreach (KMD_Private_Media::files($lesson->ID) as $key => $file) {
+                    if (!preg_match('/^[a-f0-9]{32}$/D', (string)$key) || !is_array($file) || empty($file['name'])) continue;
+                    $url = esc_url(KMD_Private_Media::url($lesson->ID, $key));
+                    $name = esc_html($file['name']);
+                    $ext = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
+                    if (in_array($ext, ['mp3', 'm4a', 'ogg', 'wav'], true)) {
+                        $output .= '<p>' . $name . '</p><audio controls preload="none" src="' . $url . '"></audio>';
+                    } elseif ($ext === 'pdf') {
+                        $output .= '<p><a href="' . $url . '">' . $name . '</a></p>';
+                    }
+                }
+            }
             $output .= '</section>';
         }
         return $output;
     }
 }
+require_once __DIR__ . '/includes/private-media.php';
 KMD_Core::boot();
+KMD_Private_Media::boot();
