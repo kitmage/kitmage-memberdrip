@@ -96,6 +96,12 @@ final class KMD_Core {
             self::field($post->ID, '_kmd_expiry', 'Access closes (site local date/time; blank = no expiry)', 'datetime-local');
             self::post_choices('_kmd_email_page', 'Experience access page for email links', 'page', absint(get_post_meta($post->ID, '_kmd_email_page', true)));
             echo '<p><label><input type="checkbox" name="_kmd_email_enabled" value="1" ' . checked(get_post_meta($post->ID, '_kmd_email_enabled', true), '1', false) . '> Enable automatic participant emails (off by default)</label></p>';
+            echo '<h4>Optional email wording</h4><p>Leave blank for default text. Placeholders: {experience}, {section}, {link}, {expiry}.</p>';
+            foreach (['welcome'=>'Welcome','release'=>'New material','closure'=>'Closing reminder'] as $event=>$label) {
+                $key = '_kmd_email_' . $event;
+                self::field($post->ID, $key . '_subject', $label . ' subject', 'text');
+                echo '<p><label>' . esc_html($label . ' message') . '<br><textarea class="large-text" rows="4" name="' . esc_attr($key . '_body') . '">' . esc_textarea(get_post_meta($post->ID, $key . '_body', true)) . '</textarea></label></p>';
+            }
         } else {
             self::post_choices('_kmd_parent', 'Experience', self::TYPE, absint(get_post_meta($post->ID, '_kmd_parent', true)));
             self::field($post->ID, '_kmd_release', 'Release (site local date/time; blank = immediately)', 'datetime-local');
@@ -121,6 +127,14 @@ final class KMD_Core {
         }
         if ($post->post_type === self::TYPE) {
             update_post_meta($id, '_kmd_email_enabled', isset($_POST['_kmd_email_enabled']) && $_POST['_kmd_email_enabled'] === '1' ? '1' : '0');
+            foreach (['welcome','release','closure'] as $event) {
+                foreach (['subject','body'] as $field) {
+                    $key = '_kmd_email_' . $event . '_' . $field;
+                    if (!isset($_POST[$key]) || !is_string($_POST[$key])) continue;
+                    $value = wp_unslash($_POST[$key]);
+                    update_post_meta($id, $key, $field === 'body' ? sanitize_textarea_field($value) : sanitize_text_field($value));
+                }
+            }
         }
         $keys = $post->post_type === self::TYPE
             ? ['_kmd_product', '_kmd_variation', '_kmd_expiry', '_kmd_email_page'] : ['_kmd_parent', '_kmd_release'];
