@@ -47,7 +47,7 @@ final class KMD_Duplicate {
         $created = [$new];
         foreach ($lessons as $lesson) {
             $copy = self::copy_post($lesson, $lesson->post_title, [
-                '_kmd_parent'=>$new, '_kmd_release'=>'configure',
+                '_kmd_parent'=>$new, '_kmd_release'=>'configure', '_kmd_release_mode'=>'fixed', '_kmd_release_days'=>'',
                 '_kmd_sharing'=>get_post_meta($lesson->ID, '_kmd_sharing', true) === '1' ? '1' : '0',
             ]);
             if (is_wp_error($copy) || !$copy) {
