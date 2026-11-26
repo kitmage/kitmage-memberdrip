@@ -37,7 +37,8 @@ final class KMD_Admin_Tools {
         } else {
             echo '<form method="post" enctype="multipart/form-data" action="' . esc_url(admin_url('admin-post.php')) . '">';
             wp_nonce_field('kmd_upload');
-            echo '<input type="hidden" name="action" value="kmd_upload"><p><label>Content section ID <input type="number" name="lesson" min="1" required></label></p>';
+            echo '<input type="hidden" name="action" value="kmd_upload">';
+            KMD_Core::post_choices('lesson', 'Content section', KMD_Core::LESSON);
             echo '<p><label>Audio or PDF <input type="file" name="material" accept=".mp3,.m4a,.ogg,.wav,.pdf" required></label></p>';
             submit_button('Upload private file');
             echo '</form>';
@@ -45,8 +46,9 @@ final class KMD_Admin_Tools {
         echo '<h2>Participant access</h2><p>Grant or block access for an existing WordPress account, or restore normal purchase-based access. The experience expiration still applies.</p>';
         echo '<form method="post" action="' . esc_url(admin_url('admin-post.php')) . '">';
         wp_nonce_field('kmd_override');
-        echo '<input type="hidden" name="action" value="kmd_override"><p><label>Experience ID <input type="number" name="experience" min="1" required></label></p>';
-        echo '<p><label>WordPress user ID <input type="number" name="participant" min="1" required></label></p>';
+        echo '<input type="hidden" name="action" value="kmd_override">';
+        KMD_Core::post_choices('experience', 'Experience', KMD_Core::TYPE);
+        echo '<p><label>Participant account email <input type="email" name="participant_email" required></label></p>';
         echo '<p><label>Access <select name="decision"><option value="grant">Grant access</option><option value="deny">Block access</option><option value="normal">Restore purchase rules</option></select></label></p>';
         submit_button('Save access');
         echo '</form></div>';
@@ -86,13 +88,17 @@ final class KMD_Admin_Tools {
     public static function override() {
         self::authorize('kmd_override');
         $experience = self::id('experience');
-        $user = self::id('participant');
+        $email = isset($_POST['participant_email']) && is_string($_POST['participant_email']) ? sanitize_email(wp_unslash($_POST['participant_email'])) : '';
+        $account = $email ? get_user_by('email', $email) : false;
+        $user = $account ? (int)$account->ID : 0;
         $decision = isset($_POST['decision']) && is_string($_POST['decision']) ? wp_unslash($_POST['decision']) : '';
         if (get_post_type($experience) !== KMD_Core::TYPE || !get_userdata($user)
             || !in_array($decision, ['grant', 'deny', 'normal'], true)) wp_die('Invalid access settings.');
         $key = '_kmd_override_' . $experience;
         if ($decision === 'normal') delete_user_meta($user, $key);
         else update_user_meta($user, $key, $decision);
+        $expected = $decision === 'normal' ? '' : $decision;
+        if (get_user_meta($user, $key, true) !== $expected) wp_die('Unable to save access settings.');
         self::finish();
     }
 }
