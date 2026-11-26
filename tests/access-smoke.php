@@ -20,11 +20,12 @@ class TestItem {
 }
 class TestOrder {
     public $paid = true;
+    public $paid_at = 0;
     public $refunded = 0;
     public $qty_refunded = 0;
     public $customer = 5;
     function is_paid() { return $this->paid; }
-    function get_date_paid() { return $this->paid ? new DateTimeImmutable() : null; }
+    function get_date_paid() { return $this->paid ? new DateTimeImmutable('@' . ($this->paid_at ?: time())) : null; }
     function get_customer_id() { return $this->customer; }
     function get_total_refunded() { return $this->refunded; }
     function get_total() { return 100; }
@@ -84,6 +85,24 @@ check(false, KMD_Core::lesson_allowed(2, 5), 'invalid release denied');
 $meta[2]['_kmd_release'] = '2000-01-01T00:00';
 check(true, KMD_Core::lesson_allowed(2, 5), 'released lesson allowed');
 check(false, KMD_Core::lesson_allowed(2, 6), 'released lesson denied for nonparticipant');
+$order->paid_at = time() - 3 * 86400;
+$meta[2]['_kmd_release_mode'] = 'relative';
+$meta[2]['_kmd_release_days'] = '7';
+check(false, KMD_Core::lesson_allowed(2, 5), 'relative future lesson denied');
+$meta[2]['_kmd_release_days'] = '2';
+check(true, KMD_Core::lesson_allowed(2, 5), 'relative released lesson allowed');
+check($order->paid_at + 2 * 86400, KMD_Core::release_at(2, 5), 'paid timestamp anchors release');
+$meta[2]['_kmd_release_days'] = '0';
+check(true, KMD_Core::lesson_allowed(2, 5), 'zero day release allowed');
+$meta[2]['_kmd_release_days'] = '';
+check(false, KMD_Core::lesson_allowed(2, 5), 'missing relative days denied');
+$meta[2]['_kmd_release_days'] = '2';
+$overrides = [6=>['_kmd_override_1'=>'grant','_kmd_grant_start_1'=>time()-4*86400]];
+check(true, KMD_Core::lesson_allowed(2, 6), 'manual grant timestamp anchors release');
+unset($overrides[6]['_kmd_grant_start_1']);
+check(false, KMD_Core::lesson_allowed(2, 6), 'old manual grant without timestamp denied for relative lesson');
+$overrides = [];
+$meta[2]['_kmd_release_mode'] = 'fixed';
 $posts[2]->post_status = 'draft';
 check(false, KMD_Core::lesson_allowed(2, 5), 'draft lesson denied');
 $posts[1]->post_status = 'draft';
