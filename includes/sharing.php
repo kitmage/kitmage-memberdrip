@@ -69,7 +69,7 @@ final class KMD_Sharing {
     private static function form($lesson, $parent) {
         $label = $parent ? 'Reply' : 'Share a reflection';
         return '<form method="post" action="' . esc_url(admin_url('admin-post.php')) . '">' .
-            wp_nonce_field('kmd_share_' . $lesson, '_wpnonce', true, false) .
+            wp_nonce_field('kmd_share_' . $lesson, '_wpnonce', false, false) .
             '<input type="hidden" name="action" value="kmd_share"><input type="hidden" name="lesson" value="' . (int)$lesson .
             '"><input type="hidden" name="parent" value="' . $parent . '"><p><label>' . $label .
             '<br><textarea name="body" maxlength="4000" required rows="3"></textarea></label></p><button type="submit">' . $label . '</button></form>';
