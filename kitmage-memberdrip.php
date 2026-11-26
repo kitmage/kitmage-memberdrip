@@ -2,7 +2,7 @@
 /**
  * Plugin Name: KitMage Member Drip
  * Description: Development foundation for purchase-protected seasonal experiences.
- * Version: 0.8.0-dev
+ * Version: 0.9.0-dev
  * Requires PHP: 7.4
  */
 defined('ABSPATH') || exit;
@@ -108,6 +108,9 @@ final class KMD_Core {
         } else {
             self::post_choices('_kmd_parent', 'Experience', self::TYPE, absint(get_post_meta($post->ID, '_kmd_parent', true)));
             self::field($post->ID, '_kmd_release', 'Release (site local date/time; blank = immediately)', 'datetime-local');
+            $mode = get_post_meta($post->ID, '_kmd_release_mode', true);
+            echo '<p><label>Release rule <select name="_kmd_release_mode"><option value="fixed" ' . selected($mode !== 'relative', true, false) . '>Calendar date</option><option value="relative" ' . selected($mode, 'relative', false) . '>Days after enrollment</option></select></label></p>';
+            self::field($post->ID, '_kmd_release_days', 'Days after enrollment (0 = immediate; blank = not configured)', 'number');
             echo '<p><label><input type="checkbox" name="_kmd_sharing" value="1" ' . checked(get_post_meta($post->ID, '_kmd_sharing', true), '1', false) . '> Enable private reflections</label></p>';
         }
     }
@@ -140,29 +143,34 @@ final class KMD_Core {
             }
         }
         $keys = $post->post_type === self::TYPE
-            ? ['_kmd_product', '_kmd_variation', '_kmd_expiry', '_kmd_email_page'] : ['_kmd_parent', '_kmd_release'];
+            ? ['_kmd_product', '_kmd_variation', '_kmd_expiry', '_kmd_email_page'] : ['_kmd_parent', '_kmd_release', '_kmd_release_mode', '_kmd_release_days'];
         foreach ($keys as $key) {
             if (!isset($_POST[$key]) || !is_string($_POST[$key])) continue;
             $value = sanitize_text_field(wp_unslash($_POST[$key]));
             if (in_array($key, ['_kmd_product', '_kmd_variation', '_kmd_parent', '_kmd_email_page'], true)) $value = absint($value);
             if (in_array($key, ['_kmd_expiry','_kmd_release'], true) && $value === ''
                 && get_post_meta($id, $key, true) === 'configure' && empty($_POST[$key . '_clear'])) continue;
+            if ($key === '_kmd_release_mode' && !in_array($value, ['fixed','relative'], true)) $value = 'invalid';
             // Preserve invalid dates so access fails closed rather than opening accidentally.
             update_post_meta($id, $key, $value);
         }
     }
 
-    public static function enrolled($experience, $user) {
+    public static function enrollment_start($experience, $user) {
         if (!$user) return false;
         $override = get_user_meta($user, '_kmd_override_' . $experience, true);
         if ($override === 'deny') return false;
-        if ($override === 'grant') return true;
+        if ($override === 'grant') {
+            $start = (int)get_user_meta($user, '_kmd_grant_start_' . $experience, true);
+            return $start > 0 && $start <= time() ? $start : 0;
+        }
         if (!function_exists('wc_get_orders') || !function_exists('wc_get_is_paid_statuses')) return false;
         $product = absint(get_post_meta($experience, '_kmd_product', true));
         $variation = absint(get_post_meta($experience, '_kmd_variation', true));
         if ($variation) $product = $variation;
         if (!$product) return false;
         $page = 1;
+        $earliest = false;
         do {
             $result = wc_get_orders([
                 'customer_id' => $user, 'status' => wc_get_is_paid_statuses(),
@@ -173,11 +181,29 @@ final class KMD_Core {
                 if ($order->get_total_refunded() > 0 && $order->get_total_refunded() >= $order->get_total()) continue;
                 foreach ($order->get_items('line_item') as $item) {
                     if ((int)$item->get_product_id() !== $product && (int)$item->get_variation_id() !== $product) continue;
-                    if ($item->get_quantity() + $order->get_qty_refunded_for_item($item->get_id()) > 0) return true;
+                    if ($item->get_quantity() + $order->get_qty_refunded_for_item($item->get_id()) > 0) {
+                        $paid = $order->get_date_paid()->getTimestamp();
+                        if ($paid > 0 && $paid <= time() && ($earliest === false || $paid < $earliest)) $earliest = $paid;
+                    }
                 }
             }
         } while ($page <= $result->max_num_pages);
-        return false;
+        return $earliest;
+    }
+
+    public static function enrolled($experience, $user) {
+        return self::enrollment_start($experience, $user) !== false;
+    }
+
+    public static function release_at($lesson, $user) {
+        $mode = (string)get_post_meta($lesson, '_kmd_release_mode', true);
+        if ($mode === '' || $mode === 'fixed') return self::timestamp((string)get_post_meta($lesson, '_kmd_release', true));
+        if ($mode !== 'relative') return false;
+        $days = (string)get_post_meta($lesson, '_kmd_release_days', true);
+        if (!preg_match('/^[0-9]{1,4}$/D', $days)) return false;
+        $start = self::enrollment_start(absint(get_post_meta($lesson, '_kmd_parent', true)), $user);
+        if (!$start) return false;
+        return $start + (int)$days * 86400;
     }
 
     public static function effective_expiry($id, $user) {
@@ -199,7 +225,7 @@ final class KMD_Core {
         $post = get_post($lesson);
         if (!$post || $post->post_type !== self::LESSON || $post->post_status !== 'publish') return false;
         $parent = absint(get_post_meta($lesson, '_kmd_parent', true));
-        $release = self::timestamp((string)get_post_meta($lesson, '_kmd_release', true));
+        $release = self::release_at($lesson, $user);
         return $release !== false && (!$release || time() >= $release) && self::allowed($parent, $user);
     }
 
@@ -317,7 +343,7 @@ final class KMD_Core {
         ]);
         $output .= '<nav class="kmd-navigation" aria-label="Experience content"><ul>';
         foreach ($lessons as $lesson) {
-            $release = self::timestamp((string)get_post_meta($lesson->ID, '_kmd_release', true));
+            $release = self::release_at($lesson->ID, get_current_user_id());
             $label = esc_html($lesson->post_title);
             if ($release !== false && (!$release || time() >= $release)) {
                 $output .= '<li><a href="#kmd-lesson-' . (int)$lesson->ID . '">' . $label . '</a> — Available</li>';
@@ -327,7 +353,7 @@ final class KMD_Core {
         }
         $output .= '</ul></nav>';
         foreach ($lessons as $lesson) {
-            $release = self::timestamp((string)get_post_meta($lesson->ID, '_kmd_release', true));
+            $release = self::release_at($lesson->ID, get_current_user_id());
             $output .= '<section class="kmd-lesson" id="kmd-lesson-' . (int)$lesson->ID . '"><h3>' . esc_html($lesson->post_title) . '</h3>';
             if ($release === false) $output .= '<p>Not available.</p>';
             elseif ($release && time() < $release) $output .= '<p>Opens ' . esc_html(wp_date(get_option('date_format') . ' ' . get_option('time_format'), $release)) . '</p>';
