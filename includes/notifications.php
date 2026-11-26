@@ -84,7 +84,7 @@ final class KMD_Notifications {
                         continue;
                     }
                     foreach ($lessons as $lesson) {
-                        $release = KMD_Core::timestamp((string)get_post_meta($lesson->ID, '_kmd_release', true));
+                        $release = KMD_Core::release_at($lesson->ID, (int)$user->ID);
                         if (!$release || $release <= $welcomed || $release > time() || time()-$release > 7*DAY_IN_SECONDS) continue;
                         if (!KMD_Core::lesson_allowed($lesson->ID, (int)$user->ID)) continue;
                         $name = self::title($lesson);
