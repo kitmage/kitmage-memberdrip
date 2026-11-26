@@ -5,10 +5,61 @@ final class KMD_Sharing {
     const VERSION = '1';
     public static function boot() {
         add_action('admin_init', [__CLASS__, 'install']);
+        add_filter('wp_privacy_personal_data_exporters', [__CLASS__, 'exporters']);
+        add_filter('wp_privacy_personal_data_erasers', [__CLASS__, 'erasers']);
         add_action('admin_menu', [__CLASS__, 'menu']);
         add_action('admin_post_kmd_share', [__CLASS__, 'submit']);
         add_action('admin_post_kmd_moderate', [__CLASS__, 'moderate']);
     }
+    public static function exporters($exporters) {
+        $exporters['kmd-reflections'] = ['exporter_friendly_name'=>'Member Drip reflections', 'callback'=>[__CLASS__, 'export_personal']];
+        return $exporters;
+    }
+
+    public static function erasers($erasers) {
+        $erasers['kmd-reflections'] = ['eraser_friendly_name'=>'Member Drip reflections', 'callback'=>[__CLASS__, 'erase_personal']];
+        return $erasers;
+    }
+
+    public static function export_personal($email, $page = 1) {
+        $account = get_user_by('email', $email);
+        if (!$account || !self::ready()) return ['data'=>[], 'done'=>true];
+        global $wpdb;
+        $table = self::table();
+        $offset = (max(1, (int)$page)-1)*100;
+        $rows = $wpdb->get_results($wpdb->prepare("SELECT * FROM $table WHERE author=%d ORDER BY id LIMIT 100 OFFSET %d", $account->ID, $offset));
+        $data = [];
+        foreach ($rows ?: [] as $row) {
+            $data[] = ['group_id'=>'kmd-reflections', 'group_label'=>'Member Drip reflections',
+                'item_id'=>'kmd-reflection-' . $row->id, 'data'=>[
+                    ['name'=>'Content section','value'=>get_the_title($row->lesson)],
+                    ['name'=>'Reflection','value'=>$row->body],
+                    ['name'=>'Submitted (UTC)','value'=>$row->created],
+                    ['name'=>'Status','value'=>$row->approved ? 'Approved' : 'Pending'],
+                ]];
+        }
+        return ['data'=>$data,'done'=>count($rows ?: [])<100];
+    }
+
+    public static function erase_personal($email, $page = 1) {
+        $account = get_user_by('email', $email);
+        $result = ['items_removed'=>false,'items_retained'=>false,'messages'=>[],'done'=>true];
+        if (!$account || !self::ready()) return $result;
+        global $wpdb;
+        $table = self::table();
+        // Tombstones preserve other participants' replies without retaining the erased author's text or identity.
+        $ids = $wpdb->get_col($wpdb->prepare("SELECT id FROM $table WHERE author=%d ORDER BY id LIMIT 100", $account->ID));
+        foreach ($ids ?: [] as $id) {
+            $updated = $wpdb->update($table, ['author'=>0,'body'=>'[Reflection removed]','created'=>'1970-01-01 00:00:00'], ['id'=>$id,'author'=>$account->ID], ['%d','%s','%s'], ['%d','%d']);
+            if ($updated === false) {
+                $result['items_retained'] = true;
+                $result['messages'][] = 'A reflection could not be erased. Please contact the site administrator.';
+            } elseif ($updated) $result['items_removed'] = true;
+        }
+        $result['done'] = $result['items_retained'] || count($ids ?: [])<100;
+        return $result;
+    }
+
     private static function table() {
         global $wpdb;
         return $wpdb->prefix . 'kmd_shares';
@@ -62,8 +113,8 @@ final class KMD_Sharing {
         return $out . self::form($lesson, 0) . '</div>';
     }
     private static function entry($row) {
-        $author = get_userdata($row->author);
-        return '<article><strong>' . esc_html($author ? $author->display_name : 'Former participant') . '</strong>' .
+        $author = $row->author ? get_userdata($row->author) : false;
+        return '<article><strong>' . esc_html($author ? $author->display_name : 'Anonymous participant') . '</strong>' .
             wpautop(esc_html($row->body)) . '</article>';
     }
     private static function form($lesson, $parent) {
