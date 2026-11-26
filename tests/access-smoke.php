@@ -7,6 +7,7 @@ function add_shortcode(...$args) {}
 function wp_timezone() { return new DateTimeZone('America/Chicago'); }
 function get_post($id) { return $GLOBALS['posts'][$id] ?? null; }
 function get_post_meta($id, $key, $single) { return $GLOBALS['meta'][$id][$key] ?? ''; }
+function get_user_meta($user, $key, $single) { return $GLOBALS['overrides'][$user][$key] ?? ''; }
 function absint($value) { return abs((int)$value); }
 function wc_get_is_paid_statuses() { return ['processing', 'completed']; }
 function wc_get_orders($args) { return (object)['orders' => $GLOBALS['orders'], 'max_num_pages' => 1]; }
@@ -56,6 +57,13 @@ $meta[1]['_kmd_expiry'] = 'invalid';
 check(false, KMD_Core::allowed(1, 5), 'invalid expiry denied');
 $meta[1]['_kmd_expiry'] = '2099-01-01T00:00';
 check(true, KMD_Core::allowed(1, 5), 'future expiry allowed');
+$overrides = [5 => ['_kmd_override_1' => 'deny'], 6 => ['_kmd_override_1' => 'grant']];
+check(false, KMD_Core::allowed(1, 5), 'manual block overrides paid order');
+check(true, KMD_Core::allowed(1, 6), 'manual grant without order');
+$meta[1]['_kmd_expiry'] = '2000-01-01T00:00';
+check(false, KMD_Core::allowed(1, 6), 'manual grant respects expiry');
+$meta[1]['_kmd_expiry'] = '';
+$overrides = [];
 $posts[1]->post_status = 'draft';
 check(false, KMD_Core::allowed(1, 5), 'draft denied');
 echo "All policy smoke checks passed.\n";
