@@ -2,7 +2,7 @@
 /**
  * Plugin Name: KitMage Member Drip
  * Description: Development foundation for purchase-protected seasonal experiences.
- * Version: 0.3.0-dev
+ * Version: 0.4.0-dev
  * Requires PHP: 7.4
  */
 defined('ABSPATH') || exit;
@@ -105,7 +105,11 @@ final class KMD_Core {
     }
 
     public static function enrolled($experience, $user) {
-        if (!$user || !function_exists('wc_get_orders') || !function_exists('wc_get_is_paid_statuses')) return false;
+        if (!$user) return false;
+        $override = get_user_meta($user, '_kmd_override_' . $experience, true);
+        if ($override === 'deny') return false;
+        if ($override === 'grant') return true;
+        if (!function_exists('wc_get_orders') || !function_exists('wc_get_is_paid_statuses')) return false;
         $product = absint(get_post_meta($experience, '_kmd_product', true));
         if (!$product) return false;
         $page = 1;
@@ -254,3 +258,5 @@ final class KMD_Core {
 require_once __DIR__ . '/includes/private-media.php';
 KMD_Core::boot();
 KMD_Private_Media::boot();
+require_once __DIR__ . '/includes/admin-tools.php';
+KMD_Admin_Tools::boot();
