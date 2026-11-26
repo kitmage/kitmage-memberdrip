@@ -42,7 +42,7 @@ final class KMD_Preview {
         $as_of = time();
         $start = time();
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-            check_admin_referer('kmd_preview_form_' . $id);
+            check_admin_referer('kmd_preview_form_' . $id, 'kmd_preview_form_nonce');
             foreach (['as_of','enrollment'] as $field) {
                 $raw = isset($_POST[$field]) && is_string($_POST[$field]) ? wp_unslash($_POST[$field]) : '';
                 $value = KMD_Core::timestamp($raw);
@@ -53,7 +53,7 @@ final class KMD_Preview {
         }
         echo '<p>This is a read-only administrator preview. It does not grant access, send messages, display private reflections, or bypass the media endpoint.</p>';
         echo '<form method="post">';
-        wp_nonce_field('kmd_preview_form_' . $id);
+        wp_nonce_field('kmd_preview_form_' . $id, 'kmd_preview_form_nonce');
         echo '<p><label>Simulated viewing time <input type="datetime-local" name="as_of" required value="' . esc_attr(wp_date('Y-m-d\TH:i', $as_of)) . '"></label></p>';
         echo '<p><label>Simulated enrollment time <input type="datetime-local" name="enrollment" required value="' . esc_attr(wp_date('Y-m-d\TH:i', $start)) . '"></label></p>';
         echo '<p><label>Mode <select name="preview_mode"><option value="schedule"' . selected($mode,'schedule',false) . '>Simulated schedule</option><option value="all"' . selected($mode,'all',false) . '>Show all written material</option></select></label></p>';
@@ -67,8 +67,6 @@ final class KMD_Preview {
         $lessons = get_posts(['post_type'=>KMD_Core::LESSON,'post_status'=>['publish','draft','private','pending','future'],
             'numberposts'=>-1,'meta_key'=>'_kmd_parent','meta_value'=>$id,'orderby'=>['menu_order'=>'ASC','ID'=>'ASC']]);
         foreach ($lessons as $lesson) {
-            $rule = (string)get_post_meta($lesson->ID,'_kmd_release_mode',true);
-            $days = (string)get_post_meta($lesson->ID,'_kmd_release_days',true);
             $release = KMD_Core::release_for_start($lesson->ID, $start);
             $open = $active && $lesson->post_status === 'publish' && $release !== false && (!$release || $release <= $as_of);
             echo '<hr><h3>' . esc_html($lesson->post_title) . '</h3><p>' . esc_html($lesson->post_status) .
