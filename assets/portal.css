@@ -1,0 +1,13 @@
+.kmd-portal { overflow-wrap: anywhere; }
+.kmd-portal .kmd-navigation { margin-block: 1.5rem 2rem; }
+.kmd-portal .kmd-navigation ul { list-style: none; padding: 0; margin: 0; }
+.kmd-portal .kmd-navigation li { border-bottom: 1px solid currentColor; border-color: rgba(127,127,127,.25); padding: .75rem 0; }
+.kmd-portal .kmd-lesson { margin-block: 2.5rem; padding-block: 1rem; scroll-margin-top: 5rem; }
+.kmd-portal audio { width: 100%; max-width: 36rem; }
+.kmd-portal .kmd-sharing { margin-block: 2rem; padding-block-start: 1.5rem; border-top: 1px solid rgba(127,127,127,.35); }
+.kmd-portal .kmd-sharing article { margin-block: 1rem; }
+.kmd-portal .kmd-sharing textarea { width: 100%; max-width: 100%; font: inherit; }
+.kmd-portal .kmd-sharing form { margin-block: 1rem; }
+.kmd-portal .kmd-reply { margin-inline-start: 1.25rem; padding-inline-start: .75rem; border-inline-start: 1px solid rgba(127,127,127,.35); }
+.kmd-portal .kmd-status { font-size: .9em; opacity: .85; }
+.kmd-portal .kmd-experience-card { margin-block: 1rem; padding: 1.25rem; border: 1px solid rgba(127,127,127,.35); border-radius: .25rem; }
