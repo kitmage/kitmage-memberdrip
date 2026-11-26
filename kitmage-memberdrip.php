@@ -2,7 +2,7 @@
 /**
  * Plugin Name: KitMage Member Drip
  * Description: Development foundation for purchase-protected seasonal experiences.
- * Version: 0.9.0-dev
+ * Version: 0.10.0-dev
  * Requires PHP: 7.4
  */
 defined('ABSPATH') || exit;
