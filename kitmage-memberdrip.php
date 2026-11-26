@@ -216,9 +216,20 @@ final class KMD_Core {
             'meta_key' => '_kmd_parent', 'meta_value' => $id,
             'orderby' => ['menu_order' => 'ASC', 'ID' => 'ASC'],
         ]);
+        $output .= '<nav class="kmd-navigation" aria-label="Experience content"><ul>';
         foreach ($lessons as $lesson) {
             $release = self::timestamp((string)get_post_meta($lesson->ID, '_kmd_release', true));
-            $output .= '<section class="kmd-lesson"><h3>' . esc_html($lesson->post_title) . '</h3>';
+            $label = esc_html($lesson->post_title);
+            if ($release !== false && (!$release || time() >= $release)) {
+                $output .= '<li><a href="#kmd-lesson-' . (int)$lesson->ID . '">' . $label . '</a> — Available</li>';
+            } else {
+                $output .= '<li>' . $label . ' — ' . ($release === false ? 'Unavailable' : esc_html(wp_date(get_option('date_format'), $release))) . '</li>';
+            }
+        }
+        $output .= '</ul></nav>';
+        foreach ($lessons as $lesson) {
+            $release = self::timestamp((string)get_post_meta($lesson->ID, '_kmd_release', true));
+            $output .= '<section class="kmd-lesson" id="kmd-lesson-' . (int)$lesson->ID . '"><h3>' . esc_html($lesson->post_title) . '</h3>';
             if ($release === false) $output .= '<p>Not available.</p>';
             elseif ($release && time() < $release) $output .= '<p>Opens ' . esc_html(wp_date(get_option('date_format') . ' ' . get_option('time_format'), $release)) . '</p>';
             else if (self::lesson_allowed($lesson->ID, get_current_user_id())) {
