@@ -100,10 +100,19 @@ final class KMD_Admin_Tools {
         $base = KMD_Core::timestamp((string)get_post_meta($experience, '_kmd_expiry', true));
         if ($extension !== '' && ($date === false || !$base || $base === false || $date <= $base || $decision === 'deny')) wp_die('An extension must be later than the configured experience closing date and cannot accompany a block.');
         $key = '_kmd_override_' . $experience;
+        $start_key = '_kmd_grant_start_' . $experience;
+        if ($decision === 'grant') {
+            if ((int)get_user_meta($user, $start_key, true) <= 0) {
+                $start = KMD_Core::enrollment_start($experience, $user);
+                update_user_meta($user, $start_key, $start > 0 ? $start : time());
+            }
+            if ((int)get_user_meta($user, $start_key, true) <= 0) wp_die('Unable to save enrollment start.');
+        }
         if ($decision === 'normal') delete_user_meta($user, $key);
         else update_user_meta($user, $key, $decision);
         $expected = $decision === 'normal' ? '' : $decision;
         if (get_user_meta($user, $key, true) !== $expected) wp_die('Unable to save access settings.');
+        if ($decision === 'normal') delete_user_meta($user, $start_key);
         $extension_key = '_kmd_extension_' . $experience;
         if ($extension === '') delete_user_meta($user, $extension_key);
         else update_user_meta($user, $extension_key, $extension);
