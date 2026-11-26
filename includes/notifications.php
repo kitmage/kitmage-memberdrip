@@ -21,6 +21,20 @@ final class KMD_Notifications {
     private static function title($post) {
         return trim(wp_strip_all_tags($post->post_title));
     }
+    public static function message($experience, $event, $subject, $body, $tokens) {
+        $prefix = '_kmd_email_' . $event;
+        $custom_subject = (string)get_post_meta($experience, $prefix . '_subject', true);
+        $custom_body = (string)get_post_meta($experience, $prefix . '_body', true);
+        $subject = strtr($custom_subject !== '' ? $custom_subject : $subject, $tokens);
+        $body = strtr($custom_body !== '' ? $custom_body : $body, $tokens);
+        // Always retain a way to reach the access page.
+        if (!empty($tokens['{link}']) && strpos($body, $tokens['{link}']) === false) $body .= "\n\n" . $tokens['{link}'];
+        return [$subject, $body];
+    }
+    private static function send_event($user, $id, $event, $key, $subject, $body, $tokens) {
+        [$subject, $body] = self::message($id, $event, $subject, $body, $tokens);
+        return self::send($user, $key, $subject, $body);
+    }
     private static function send($user, $event, $subject, $body) {
         if (!is_email($user->user_email)) return false;
         // Unique database option acts as an at-most-once claim. A crashed send
@@ -57,12 +71,14 @@ final class KMD_Notifications {
                 $lessons = get_posts(['kmd_internal'=>true, 'post_type'=>KMD_Core::LESSON,
                     'post_status'=>'publish', 'numberposts'=>-1, 'meta_key'=>'_kmd_parent', 'meta_value'=>$id]);
                 $expiry = KMD_Core::timestamp((string)get_post_meta($id, '_kmd_expiry', true));
+                $tokens = ['{experience}'=>$title,'{section}'=>'','{link}'=>$link,
+                    '{expiry}'=>$expiry ? wp_date(get_option('date_format') . ' ' . get_option('time_format'), $expiry) : ''];
                 foreach ($users as $user) {
                     if (!KMD_Core::allowed($id, (int)$user->ID)) continue;
                     $welcome_key = '_kmd_welcome_' . $id;
                     $welcomed = (int)get_user_meta($user->ID, $welcome_key, true);
                     if (!$welcomed) {
-                        if (self::send($user, "welcome:$id", "Welcome to $title", "Your experience is ready. Sign in to access your available material:\n$link")) {
+                        if (self::send_event($user, $id, "welcome", "welcome:$id", "Welcome to $title", "Your experience is ready. Sign in to access your available material:\n$link", $tokens)) {
                             update_user_meta($user->ID, $welcome_key, time());
                         }
                         continue;
@@ -72,11 +88,11 @@ final class KMD_Notifications {
                         if (!$release || $release <= $welcomed || $release > time() || time()-$release > 7*DAY_IN_SECONDS) continue;
                         if (!KMD_Core::lesson_allowed($lesson->ID, (int)$user->ID)) continue;
                         $name = self::title($lesson);
-                        self::send($user, "release:$id:" . $lesson->ID, "New material in $title", "$name is now available. Sign in here:\n$link");
+                        self::send_event($user, $id, "release", "release:$id:" . $lesson->ID, "New material in $title", "$name is now available. Sign in here:\n$link", array_replace($tokens, ["{section}"=>$name]));
                     }
                     if ($expiry && $expiry > time() && $expiry-time() <= 7*DAY_IN_SECONDS) {
                         $date = wp_date(get_option('date_format') . ' ' . get_option('time_format'), $expiry);
-                        self::send($user, "closure:$id", "$title is closing soon", "Your access closes on $date (site time). Revisit your material before then:\n$link");
+                        self::send_event($user, $id, "closure", "closure:$id", "$title is closing soon", "Your access closes on $date (site time). Revisit your material before then:\n$link", $tokens);
                     }
                 }
             }
