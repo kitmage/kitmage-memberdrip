@@ -17,3 +17,6 @@ The initial renderer uses non-public custom post types and sanitizes stored HTML
 - Verify rollback and backups before any controlled live test.
 
 Owner has authorized controlled production testing, but this does not make untested code safe to deploy. Do not use actual member material until all access and cache checks pass. No production credentials or customer data are needed in GitHub.
+
+## Update: 0.4.0-dev
+Private file delivery and upload controls are now implemented. A host administrator must create a directory outside all web-accessible roots and set KMD_PRIVATE_DIR in wp-config.php to its absolute path. The directory must be writable by PHP, restricted to the service account, and verified against web-server aliases and CDN configuration. Do not use the standard media library for confidential material. Files & Access under Experiences supports uploads by content section ID and manual grants/blocks by WordPress user ID. Grants respect the experience expiration; per-user extensions, file deletion, concurrent upload handling and participant discovery are not yet implemented. Test upload size limits, MIME validation, audio range requests and access revocation on the actual host. The previous limitations above concerning missing upload and manual grant functionality are superseded by this update.
