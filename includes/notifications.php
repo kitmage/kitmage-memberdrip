@@ -70,11 +70,11 @@ final class KMD_Notifications {
                 $title = self::title($experience);
                 $lessons = get_posts(['kmd_internal'=>true, 'post_type'=>KMD_Core::LESSON,
                     'post_status'=>'publish', 'numberposts'=>-1, 'meta_key'=>'_kmd_parent', 'meta_value'=>$id]);
-                $expiry = KMD_Core::timestamp((string)get_post_meta($id, '_kmd_expiry', true));
-                $tokens = ['{experience}'=>$title,'{section}'=>'','{link}'=>$link,
-                    '{expiry}'=>$expiry ? wp_date(get_option('date_format') . ' ' . get_option('time_format'), $expiry) : ''];
                 foreach ($users as $user) {
                     if (!KMD_Core::allowed($id, (int)$user->ID)) continue;
+                    $expiry = KMD_Core::effective_expiry($id, (int)$user->ID);
+                    $tokens = ['{experience}'=>$title,'{section}'=>'','{link}'=>$link,
+                        '{expiry}'=>$expiry ? wp_date(get_option('date_format') . ' ' . get_option('time_format'), $expiry) : ''];
                     $welcome_key = '_kmd_welcome_' . $id;
                     $welcomed = (int)get_user_meta($user->ID, $welcome_key, true);
                     if (!$welcomed) {
@@ -92,7 +92,7 @@ final class KMD_Notifications {
                     }
                     if ($expiry && $expiry > time() && $expiry-time() <= 7*DAY_IN_SECONDS) {
                         $date = wp_date(get_option('date_format') . ' ' . get_option('time_format'), $expiry);
-                        self::send_event($user, $id, "closure", "closure:$id", "$title is closing soon", "Your access closes on $date (site time). Revisit your material before then:\n$link", $tokens);
+                        self::send_event($user, $id, "closure", "closure:$id:$expiry", "$title is closing soon", "Your access closes on $date (site time). Revisit your material before then:\n$link", $tokens);
                     }
                 }
             }
