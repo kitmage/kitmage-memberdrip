@@ -2,7 +2,7 @@
 /**
  * Plugin Name: KitMage Member Drip
  * Description: Development foundation for purchase-protected seasonal experiences.
- * Version: 0.4.0-dev
+ * Version: 0.5.0-dev
  * Requires PHP: 7.4
  */
 defined('ABSPATH') || exit;
@@ -77,6 +77,7 @@ final class KMD_Core {
         } else {
             self::field($post->ID, '_kmd_parent', 'Experience ID', 'number');
             self::field($post->ID, '_kmd_release', 'Release (site local date/time; blank = immediately)', 'datetime-local');
+            echo '<p><label><input type="checkbox" name="_kmd_sharing" value="1" ' . checked(get_post_meta($post->ID, '_kmd_sharing', true), '1', false) . '> Enable private reflections</label></p>';
         }
     }
 
@@ -93,6 +94,9 @@ final class KMD_Core {
             || !current_user_can('manage_options') || !current_user_can('edit_post', $id)
             || !isset($_POST['kmd_nonce']) || !is_string($_POST['kmd_nonce'])
             || !wp_verify_nonce(sanitize_text_field(wp_unslash($_POST['kmd_nonce'])), 'kmd_save')) return;
+        if ($post->post_type === self::LESSON) {
+            update_post_meta($id, '_kmd_sharing', isset($_POST['_kmd_sharing']) && $_POST['_kmd_sharing'] === '1' ? '1' : '0');
+        }
         $keys = $post->post_type === self::TYPE
             ? ['_kmd_product', '_kmd_expiry'] : ['_kmd_parent', '_kmd_release'];
         foreach ($keys as $key) {
@@ -249,6 +253,7 @@ final class KMD_Core {
                         $output .= '<p><a href="' . $url . '">' . $name . '</a></p>';
                     }
                 }
+                $output .= KMD_Sharing::render($lesson->ID);
             }
             $output .= '</section>';
         }
@@ -260,3 +265,5 @@ KMD_Core::boot();
 KMD_Private_Media::boot();
 require_once __DIR__ . '/includes/admin-tools.php';
 KMD_Admin_Tools::boot();
+require_once __DIR__ . '/includes/sharing.php';
+KMD_Sharing::boot();
