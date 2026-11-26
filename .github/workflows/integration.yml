@@ -1,0 +1,61 @@
+name: WordPress integration and beta package
+on: [push, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        storage: ['legacy', 'hpos']
+    services:
+      mysql:
+        image: mariadb:10.11
+        env:
+          MARIADB_ROOT_PASSWORD: kmd-test-password
+          MARIADB_DATABASE: kmd_test
+        ports:
+          - 3306:3306
+        options: --health-cmd="healthcheck.sh --connect --innodb_initialized" --health-interval=10s --health-timeout=5s --health-retries=10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: mysqli, mbstring, curl, zip, fileinfo
+          tools: wp-cli
+          coverage: none
+      - name: Install disposable WordPress
+        run: |
+          mkdir -p "$RUNNER_TEMP/kmd-wp"
+          wp --path="$RUNNER_TEMP/kmd-wp" core download
+          wp --path="$RUNNER_TEMP/kmd-wp" config create --dbname=kmd_test --dbuser=root --dbpass=kmd-test-password --dbhost=127.0.0.1:3306
+          wp --path="$RUNNER_TEMP/kmd-wp" core install --url=http://localhost --title="Member Drip test" --admin_user=kmdadmin --admin_password=temporary-ci-password --admin_email=admin@example.test --skip-email
+          wp --path="$RUNNER_TEMP/kmd-wp" plugin install woocommerce --activate
+          wp --path="$RUNNER_TEMP/kmd-wp" option update woocommerce_custom_orders_table_enabled "$([ '${{ matrix.storage }}' = hpos ] && echo yes || echo no)"
+          wp --path="$RUNNER_TEMP/kmd-wp" option update woocommerce_custom_orders_table_data_sync_enabled no
+          mkdir -p "$RUNNER_TEMP/kmd-wp/wp-content/plugins/kitmage-memberdrip"
+          cp kitmage-memberdrip.php "$RUNNER_TEMP/kmd-wp/wp-content/plugins/kitmage-memberdrip/"
+          cp -r includes assets "$RUNNER_TEMP/kmd-wp/wp-content/plugins/kitmage-memberdrip/"
+          wp --path="$RUNNER_TEMP/kmd-wp" plugin activate kitmage-memberdrip
+      - name: Run actual WordPress integration tests
+        env:
+          KMD_INTEGRATION_TEST: '1'
+        run: wp --path="$RUNNER_TEMP/kmd-wp" eval-file tests/wordpress-integration.php
+  package:
+    needs: integration
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Package installable development ZIP
+        run: |
+          mkdir -p dist/kitmage-memberdrip
+          cp kitmage-memberdrip.php dist/kitmage-memberdrip/
+          cp -r includes assets dist/kitmage-memberdrip/
+          cd dist
+          zip -r kitmage-memberdrip-beta.zip kitmage-memberdrip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kitmage-memberdrip-beta
+          path: dist/kitmage-memberdrip-beta.zip
+          if-no-files-found: error
