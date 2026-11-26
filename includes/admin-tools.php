@@ -43,13 +43,14 @@ final class KMD_Admin_Tools {
             submit_button('Upload private file');
             echo '</form>';
         }
-        echo '<h2>Participant access</h2><p>Grant or block access for an existing WordPress account, or restore normal purchase-based access. The experience expiration still applies.</p>';
+        echo '<h2>Participant access</h2><p>Grant or block access for an existing WordPress account, or restore normal purchase-based access. An optional personal closing date can extend access; blocking or refunding still denies it. Leave blank to remove a previous extension.</p>';
         echo '<form method="post" action="' . esc_url(admin_url('admin-post.php')) . '">';
         wp_nonce_field('kmd_override');
         echo '<input type="hidden" name="action" value="kmd_override">';
         KMD_Core::post_choices('experience', 'Experience', KMD_Core::TYPE);
         echo '<p><label>Participant account email <input type="email" name="participant_email" required></label></p>';
         echo '<p><label>Access <select name="decision"><option value="grant">Grant access</option><option value="deny">Block access</option><option value="normal">Restore purchase rules</option></select></label></p>';
+        echo '<p><label>Optional personal closing date (site time) <input type="datetime-local" name="extension"></label></p>';
         submit_button('Save access');
         echo '</form></div>';
     }
@@ -94,11 +95,19 @@ final class KMD_Admin_Tools {
         $decision = isset($_POST['decision']) && is_string($_POST['decision']) ? wp_unslash($_POST['decision']) : '';
         if (get_post_type($experience) !== KMD_Core::TYPE || !get_userdata($user)
             || !in_array($decision, ['grant', 'deny', 'normal'], true)) wp_die('Invalid access settings.');
+        $extension = isset($_POST['extension']) && is_string($_POST['extension']) ? sanitize_text_field(wp_unslash($_POST['extension'])) : '';
+        $date = KMD_Core::timestamp($extension);
+        $base = KMD_Core::timestamp((string)get_post_meta($experience, '_kmd_expiry', true));
+        if ($extension !== '' && ($date === false || !$base || $base === false || $date <= $base || $decision === 'deny')) wp_die('An extension must be later than the configured experience closing date and cannot accompany a block.');
         $key = '_kmd_override_' . $experience;
         if ($decision === 'normal') delete_user_meta($user, $key);
         else update_user_meta($user, $key, $decision);
         $expected = $decision === 'normal' ? '' : $decision;
         if (get_user_meta($user, $key, true) !== $expected) wp_die('Unable to save access settings.');
+        $extension_key = '_kmd_extension_' . $experience;
+        if ($extension === '') delete_user_meta($user, $extension_key);
+        else update_user_meta($user, $extension_key, $extension);
+        if ((string)get_user_meta($user, $extension_key, true) !== $extension) wp_die('Unable to save personal closing date.');
         self::finish();
     }
 }
