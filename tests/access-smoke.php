@@ -1,6 +1,7 @@
 <?php
 // Standalone policy smoke test. Not a substitute for WordPress integration tests.
 define('ABSPATH', __DIR__);
+function register_deactivation_hook(...$args) {}
 function add_action(...$args) {}
 function add_filter(...$args) {}
 function add_shortcode(...$args) {}
