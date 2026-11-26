@@ -2,7 +2,7 @@
 /**
  * Plugin Name: KitMage Member Drip
  * Description: Development foundation for purchase-protected seasonal experiences.
- * Version: 0.5.0-dev
+ * Version: 0.6.0-dev
  * Requires PHP: 7.4
  */
 defined('ABSPATH') || exit;
@@ -74,6 +74,8 @@ final class KMD_Core {
         if ($post->post_type === self::TYPE) {
             self::field($post->ID, '_kmd_product', 'WooCommerce product ID', 'number');
             self::field($post->ID, '_kmd_expiry', 'Access closes (site local date/time; blank = no expiry)', 'datetime-local');
+            self::field($post->ID, '_kmd_email_page', 'Published experience access page ID for email links', 'number');
+            echo '<p><label><input type="checkbox" name="_kmd_email_enabled" value="1" ' . checked(get_post_meta($post->ID, '_kmd_email_enabled', true), '1', false) . '> Enable automatic participant emails (off by default)</label></p>';
         } else {
             self::field($post->ID, '_kmd_parent', 'Experience ID', 'number');
             self::field($post->ID, '_kmd_release', 'Release (site local date/time; blank = immediately)', 'datetime-local');
@@ -81,7 +83,7 @@ final class KMD_Core {
         }
     }
 
-    private static function timestamp($value) {
+    public static function timestamp($value) {
         if ($value === '') return 0;
         $date = DateTimeImmutable::createFromFormat('!Y-m-d\TH:i', $value, wp_timezone());
         if (!$date || $date->format('Y-m-d\TH:i') !== $value) return false;
@@ -97,12 +99,15 @@ final class KMD_Core {
         if ($post->post_type === self::LESSON) {
             update_post_meta($id, '_kmd_sharing', isset($_POST['_kmd_sharing']) && $_POST['_kmd_sharing'] === '1' ? '1' : '0');
         }
+        if ($post->post_type === self::TYPE) {
+            update_post_meta($id, '_kmd_email_enabled', isset($_POST['_kmd_email_enabled']) && $_POST['_kmd_email_enabled'] === '1' ? '1' : '0');
+        }
         $keys = $post->post_type === self::TYPE
-            ? ['_kmd_product', '_kmd_expiry'] : ['_kmd_parent', '_kmd_release'];
+            ? ['_kmd_product', '_kmd_expiry', '_kmd_email_page'] : ['_kmd_parent', '_kmd_release'];
         foreach ($keys as $key) {
             if (!isset($_POST[$key]) || !is_string($_POST[$key])) continue;
             $value = sanitize_text_field(wp_unslash($_POST[$key]));
-            if (in_array($key, ['_kmd_product', '_kmd_parent'], true)) $value = absint($value);
+            if (in_array($key, ['_kmd_product', '_kmd_parent', '_kmd_email_page'], true)) $value = absint($value);
             // Preserve invalid dates so access fails closed rather than opening accidentally.
             update_post_meta($id, $key, $value);
         }
@@ -267,3 +272,6 @@ require_once __DIR__ . '/includes/admin-tools.php';
 KMD_Admin_Tools::boot();
 require_once __DIR__ . '/includes/sharing.php';
 KMD_Sharing::boot();
+require_once __DIR__ . '/includes/notifications.php';
+KMD_Notifications::boot();
+register_deactivation_hook(__FILE__, ['KMD_Notifications', 'deactivate']);
