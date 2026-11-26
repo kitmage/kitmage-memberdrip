@@ -5,6 +5,7 @@ final class KMD_Admin_Tools {
     public static function boot() {
         add_action('admin_menu', [__CLASS__, 'menu']);
         add_action('admin_post_kmd_upload', [__CLASS__, 'upload']);
+        add_action('admin_post_kmd_remove_file', [__CLASS__, 'remove_file']);
         add_action('admin_post_kmd_override', [__CLASS__, 'override']);
     }
 
@@ -43,6 +44,7 @@ final class KMD_Admin_Tools {
             submit_button('Upload private file');
             echo '</form>';
         }
+        self::file_list();
         echo '<h2>Participant access</h2><p>Grant or block access for an existing WordPress account, or restore normal purchase-based access. An optional personal closing date can extend access; blocking or refunding still denies it. Leave blank to remove a previous extension.</p>';
         echo '<form method="post" action="' . esc_url(admin_url('admin-post.php')) . '">';
         wp_nonce_field('kmd_override');
@@ -53,6 +55,50 @@ final class KMD_Admin_Tools {
         echo '<p><label>Optional personal closing date (site time) <input type="datetime-local" name="extension"></label></p>';
         submit_button('Save access');
         echo '</form></div>';
+    }
+
+    private static function file_list() {
+        echo '<h2>Manage private files</h2><p>Removing a file revokes future downloads. Copies already saved by participants cannot be recalled.</p>';
+        $lessons = get_posts(['post_type'=>KMD_Core::LESSON, 'post_status'=>['publish','draft','private','pending','future','trash'], 'numberposts'=>-1]);
+        foreach ($lessons as $lesson) {
+            foreach (KMD_Private_Media::files($lesson->ID) as $key=>$entry) {
+                if (!preg_match('/^[a-f0-9]{32}$/D', (string)$key) || !is_array($entry) || !isset($entry['name'])) continue;
+                echo '<form method="post" action="' . esc_url(admin_url('admin-post.php')) . '">';
+                wp_nonce_field('kmd_remove_file_' . $lesson->ID . '_' . $key);
+                echo '<input type="hidden" name="action" value="kmd_remove_file"><input type="hidden" name="lesson" value="' . (int)$lesson->ID . '"><input type="hidden" name="file" value="' . esc_attr($key) . '"><p>' . esc_html($lesson->post_title . ' — ' . $entry['name']) .
+                    ' <label><input type="checkbox" name="confirm" value="1" required> Confirm removal</label> <button class="button">Remove file</button></p></form>';
+            }
+        }
+    }
+
+    public static function remove_file() {
+        $lesson = self::id('lesson');
+        $key = isset($_POST['file']) && is_string($_POST['file']) ? wp_unslash($_POST['file']) : '';
+        if (!preg_match('/^[a-f0-9]{32}$/D', $key)) wp_die('Invalid file.');
+        self::authorize('kmd_remove_file_' . $lesson . '_' . $key);
+        if (($_POST['confirm'] ?? '') !== '1' || get_post_type($lesson) !== KMD_Core::LESSON
+            || !current_user_can('edit_post', $lesson)) wp_die('Invalid removal request.');
+        $root = KMD_Private_Media::root();
+        if (!$root) wp_die('Private storage is unavailable.');
+        $lock = 'kmd_file_lock_' . $lesson;
+        if (!add_option($lock, time(), '', false)) wp_die('Another file change is in progress.');
+        $error = '';
+        try {
+            $files = KMD_Private_Media::files($lesson);
+            if (!isset($files[$key])) $error = 'File record not found.';
+            else {
+                unset($files[$key]);
+                if (!update_post_meta($lesson, '_kmd_files', $files)) $error = 'Unable to revoke file access.';
+                else {
+                    $path = $root . DIRECTORY_SEPARATOR . $key;
+                    if (is_link($path) || (file_exists($path) && (!is_file($path) || !unlink($path)))) {
+                        $error = 'File access revoked, but physical deletion failed. Ask the host to remove the orphaned file: ' . $key;
+                    }
+                }
+            }
+        } finally { delete_option($lock); }
+        if ($error) wp_die(esc_html($error));
+        self::finish();
     }
 
     public static function upload() {
@@ -77,9 +123,18 @@ final class KMD_Admin_Tools {
         $path = $root . DIRECTORY_SEPARATOR . $key;
         if (file_exists($path) || !move_uploaded_file($file['tmp_name'], $path)) wp_die('Unable to store file.');
         if (!chmod($path, 0600)) { unlink($path); wp_die('Unable to secure file permissions.'); }
-        $files = KMD_Private_Media::files($lesson);
-        $files[$key] = ['name' => $name];
-        if (!update_post_meta($lesson, '_kmd_files', $files)) {
+        $lock = 'kmd_file_lock_' . $lesson;
+        if (!add_option($lock, time(), '', false)) {
+            unlink($path);
+            wp_die('Another file change is in progress. Try the upload again.');
+        }
+        $saved = false;
+        try {
+            $files = KMD_Private_Media::files($lesson);
+            $files[$key] = ['name' => $name];
+            $saved = update_post_meta($lesson, '_kmd_files', $files);
+        } finally { delete_option($lock); }
+        if (!$saved) {
             unlink($path);
             wp_die('Unable to save file record.');
         }
