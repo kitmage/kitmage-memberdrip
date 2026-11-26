@@ -2,7 +2,7 @@
 /**
  * Plugin Name: KitMage Member Drip
  * Description: Development foundation for purchase-protected seasonal experiences.
- * Version: 0.7.0-dev
+ * Version: 0.8.0-dev
  * Requires PHP: 7.4
  */
 defined('ABSPATH') || exit;
@@ -18,6 +18,9 @@ final class KMD_Core {
         add_filter('map_meta_cap', [__CLASS__, 'guard_capability'], 10, 4);
         add_action('add_meta_boxes', [__CLASS__, 'boxes']);
         add_action('save_post', [__CLASS__, 'save'], 10, 2);
+        add_action('wp_enqueue_scripts', [__CLASS__, 'portal_assets']);
+        add_action('wp_ajax_kmd_portal', [__CLASS__, 'portal_request']);
+        add_action('wp_ajax_nopriv_kmd_portal', [__CLASS__, 'portal_request']);
         add_shortcode('kmd_experiences', [__CLASS__, 'dashboard']);
         add_shortcode('kmd_experience', [__CLASS__, 'experience']);
         add_action('admin_notices', [__CLASS__, 'notice']);
@@ -177,10 +180,17 @@ final class KMD_Core {
         return false;
     }
 
+    public static function effective_expiry($id, $user) {
+        $expiry = self::timestamp((string)get_post_meta($id, '_kmd_expiry', true));
+        if ($expiry === false || !$expiry || !$user) return $expiry;
+        $extension = self::timestamp((string)get_user_meta($user, '_kmd_extension_' . $id, true));
+        return $extension !== false && $extension > $expiry ? $extension : $expiry;
+    }
+
     public static function allowed($id, $user) {
         $post = get_post($id);
         if (!$post || $post->post_type !== self::TYPE || $post->post_status !== 'publish') return false;
-        $expiry = self::timestamp((string)get_post_meta($id, '_kmd_expiry', true));
+        $expiry = self::effective_expiry($id, $user);
         if ($expiry === false || ($expiry && time() >= $expiry)) return false;
         return self::enrolled($id, $user);
     }
@@ -241,27 +251,65 @@ final class KMD_Core {
         return wpautop(wp_kses_post(strip_shortcodes($post->post_content)));
     }
 
-    public static function dashboard() {
+    public static function portal_assets() {
+        wp_enqueue_script('kmd-portal', plugins_url('assets/portal.js', __FILE__), [], '0.8.0', true);
+        wp_enqueue_style('kmd-portal', plugins_url('assets/portal.css', __FILE__), [], '0.8.0');
+    }
+
+    private static function portal_shell($id) {
         if (!self::can_render()) return '';
+        // Only public configuration is included in the Elementor/page cache.
+        return '<div class="kmd-portal" data-kmd-experience="' . (int)$id .
+            '" data-kmd-endpoint="' . esc_url(admin_url('admin-ajax.php')) .
+            '"><p role="status">Loading your experience…</p><noscript>Enable JavaScript to view your experience.</noscript></div>';
+    }
+
+    public static function dashboard() {
+        return self::portal_shell(0);
+    }
+
+    public static function experience($attributes) {
+        $attributes = shortcode_atts(['id' => 0], $attributes, 'kmd_experience');
+        $id = absint($attributes['id']);
+        return $id ? self::portal_shell($id) : '<p>Experience not configured.</p>';
+    }
+
+    public static function portal_request() {
         self::private_response();
+        if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') wp_send_json_error([], 405);
+        $raw = $_POST['experience'] ?? null;
+        if (!is_string($raw) || !preg_match('/^[0-9]+$/D', $raw)) wp_send_json_error([], 400);
+        $id = absint($raw);
+        if (!get_current_user_id()) {
+            $login = function_exists('wc_get_page_permalink') ? wc_get_page_permalink('myaccount') : wp_login_url();
+            wp_send_json_success(['html'=>'<p><a href="' . esc_url($login) . '">Sign in</a> to view your experiences.</p>']);
+        }
+        wp_send_json_success(['html'=>$id ? self::render_experience($id) : self::render_dashboard()]);
+    }
+
+    private static function render_dashboard() {
         $user = get_current_user_id();
         if (!$user) return '<p>Please log in to view your experiences.</p>';
         $output = '';
         foreach (get_posts(['suppress_filters' => true, 'kmd_internal' => true, 'post_type' => self::TYPE, 'post_status' => 'publish', 'numberposts' => -1]) as $post) {
             if (self::allowed($post->ID, $user)) {
-                $output .= '<section><h2>' . esc_html($post->post_title) . '</h2>' . self::experience(['id' => $post->ID]) . '</section>';
+                $page = get_post(absint(get_post_meta($post->ID, '_kmd_email_page', true)));
+                $url = $page && $page->post_type === 'page' && $page->post_status === 'publish' ? get_permalink($page) : '';
+                $output .= '<section class="kmd-experience-card"><h2>' . esc_html($post->post_title) . '</h2>';
+                $expiry = self::effective_expiry($post->ID, $user);
+                if ($expiry) $output .= '<p class="kmd-status">Access through ' . esc_html(wp_date(get_option('date_format') . ' ' . get_option('time_format'), $expiry)) . '</p>';
+                $output .= $url ? '<p><a href="' . esc_url($url) . '">Enter experience</a></p>' : self::render_experience($post->ID);
+                $output .= '</section>';
             }
         }
         return $output ?: '<p>No active experiences.</p>';
     }
 
-    public static function experience($attributes) {
-        if (!self::can_render()) return '';
-        self::private_response();
-        $attributes = shortcode_atts(['id' => 0], $attributes, 'kmd_experience');
-        $id = absint($attributes['id']);
+    private static function render_experience($id) {
         if (!self::allowed($id, get_current_user_id())) return '<p>This experience is not currently available to your account.</p>';
-        $output = self::render_content(get_post($id));
+        $output = '<div class="kmd-experience">' . self::render_content(get_post($id));
+        $expiry = self::effective_expiry($id, get_current_user_id());
+        if ($expiry) $output .= '<p class="kmd-status">Access closes ' . esc_html(wp_date(get_option('date_format') . ' ' . get_option('time_format'), $expiry)) . '</p>';
         $lessons = get_posts([
             'kmd_internal' => true, 'post_type' => self::LESSON, 'post_status' => 'publish', 'numberposts' => -1,
             'meta_key' => '_kmd_parent', 'meta_value' => $id,
@@ -300,7 +348,7 @@ final class KMD_Core {
             }
             $output .= '</section>';
         }
-        return $output;
+        return $output . '</div>';
     }
 }
 require_once __DIR__ . '/includes/private-media.php';
