@@ -2,7 +2,7 @@
 /**
  * Plugin Name: KitMage Member Drip
  * Description: Development foundation for purchase-protected seasonal experiences.
- * Version: 0.1.0-dev
+ * Version: 0.2.0-dev
  * Requires PHP: 7.4
  */
 defined('ABSPATH') || exit;
@@ -13,6 +13,9 @@ final class KMD_Core {
 
     public static function boot() {
         add_action('init', [__CLASS__, 'register']);
+        add_action('template_redirect', [__CLASS__, 'guard_request'], 0);
+        add_action('pre_get_posts', [__CLASS__, 'guard_query'], 99);
+        add_filter('map_meta_cap', [__CLASS__, 'guard_capability'], 10, 4);
         add_action('add_meta_boxes', [__CLASS__, 'boxes']);
         add_action('save_post', [__CLASS__, 'save'], 10, 2);
         add_shortcode('kmd_experiences', [__CLASS__, 'dashboard']);
@@ -131,9 +134,47 @@ final class KMD_Core {
         return self::enrolled($id, $user);
     }
 
+    public static function guard_capability($caps, $cap, $user, $args) {
+        if (in_array($cap, ['read_post', 'edit_post', 'delete_post'], true) && !empty($args[0])
+            && in_array(get_post_type((int)$args[0]), [self::TYPE, self::LESSON], true)) {
+            return ['manage_options'];
+        }
+        return $caps;
+    }
+
+    public static function guard_query($query) {
+        if ($query->get('kmd_internal') === true && !$query->is_main_query()) return;
+        if (is_admin() && current_user_can('manage_options')) return;
+        $type = $query->get('post_type');
+        if ($type === 'any') {
+            $type = array_values(get_post_types(['exclude_from_search' => false]));
+        }
+        if ($type) {
+            $types = array_diff((array)$type, [self::TYPE, self::LESSON]);
+            $query->set('post_type', $types ? array_values($types) : ['kmd_no_public_type']);
+        }
+    }
+
+    public static function guard_request() {
+        if (in_array(get_post_type(get_queried_object_id()), [self::TYPE, self::LESSON], true)) {
+            self::private_response();
+            wp_die('Not found.', '', ['response' => 404]);
+        }
+    }
+
     private static function private_response() {
         if (!defined('DONOTCACHEPAGE')) define('DONOTCACHEPAGE', true);
-        if (!headers_sent()) nocache_headers();
+        if (!headers_sent()) {
+            nocache_headers();
+            header('Cache-Control: private, no-store, max-age=0', true);
+        }
+    }
+
+    private static function can_render() {
+        return !is_admin() && !wp_doing_ajax() && !wp_doing_cron()
+            && !(defined('REST_REQUEST') && REST_REQUEST)
+            && !(defined('XMLRPC_REQUEST') && XMLRPC_REQUEST)
+            && !is_feed() && !is_embed();
     }
 
     private static function render_content($post) {
@@ -142,11 +183,12 @@ final class KMD_Core {
     }
 
     public static function dashboard() {
+        if (!self::can_render()) return '';
         self::private_response();
         $user = get_current_user_id();
         if (!$user) return '<p>Please log in to view your experiences.</p>';
         $output = '';
-        foreach (get_posts(['post_type' => self::TYPE, 'post_status' => 'publish', 'numberposts' => -1]) as $post) {
+        foreach (get_posts(['suppress_filters' => true, 'kmd_internal' => true, 'post_type' => self::TYPE, 'post_status' => 'publish', 'numberposts' => -1]) as $post) {
             if (self::allowed($post->ID, $user)) {
                 $output .= '<section><h2>' . esc_html($post->post_title) . '</h2>' . self::experience(['id' => $post->ID]) . '</section>';
             }
@@ -155,13 +197,14 @@ final class KMD_Core {
     }
 
     public static function experience($attributes) {
+        if (!self::can_render()) return '';
         self::private_response();
         $attributes = shortcode_atts(['id' => 0], $attributes, 'kmd_experience');
         $id = absint($attributes['id']);
         if (!self::allowed($id, get_current_user_id())) return '<p>This experience is not currently available to your account.</p>';
         $output = self::render_content(get_post($id));
         $lessons = get_posts([
-            'post_type' => self::LESSON, 'post_status' => 'publish', 'numberposts' => -1,
+            'kmd_internal' => true, 'post_type' => self::LESSON, 'post_status' => 'publish', 'numberposts' => -1,
             'meta_key' => '_kmd_parent', 'meta_value' => $id,
             'orderby' => ['menu_order' => 'ASC', 'ID' => 'ASC'],
         ]);
